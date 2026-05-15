@@ -1,0 +1,29 @@
+# REPORT – TP1 Redis (ShopFast)
+
+## 1. Performance comparison (cache hit vs miss)
+
+- Cache hit: response time < 5 ms (read from Redis).
+- Cache miss: response time > 50 ms (read from DB + write to Redis).
+- With 80% hit rate, DB load is reduced by 5x.
+
+## 2. Modeling choices
+
+- **Hash for products**: direct access to fields (name, price, stock).
+- **List for history**: LPUSH + LTRIM keeps last 10 items in order.
+- **Set for categories**: SADD/SMEMBERS handles product-category relations without duplicates.
+- **Sorted Set for leaderboard**: automatic sorting by sales score, rank lookup in O(log N).
+- **Sliding expiration for sessions**: EXPIRE on each access – session expires 30 minutes after last activity.
+
+## 3. Reflection questions
+
+### Q1 – What happens if Redis restarts?
+All in-memory data is lost (carts, sessions, cache).  
+The cache rebuilds itself on misses, but carts and sessions are permanently lost.  
+
+
+### Q2 – Cache/DB consistency under concurrent access?
+Two threads may read the DB at the same time on a miss and write two different cache versions.  
+
+### Q3 – When is a TTL too short?
+All keys expire at the same time → Thundering Herd: DB gets a massive spike.  
+Hit rate collapses, cache becomes useless.  
