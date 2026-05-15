@@ -1,4 +1,5 @@
-"""
+   ## exo 3
+    """
 TP1 - Exercice 3 : Pattern Cache-Aside avec TTL
 Use Case : Cache des pages produits ShopFast
 """
@@ -30,20 +31,40 @@ def get_product_cached(r, product_id: int, ttl: int = 600) -> Optional[dict]:
     3. Retourner le produit
     4. Afficher si c'est un HIT ou MISS avec la latence
     """
+    cache_key = f"product_cache:{product_id}"
     start = time.time()
-    
-    # TODO: Implémenter le pattern Cache-Aside
-    # Utiliser json.dumps/json.loads pour sérialiser
-    
-    elapsed = time.time() - start
-    # TODO: Afficher "CACHE HIT (Xms)" ou "CACHE MISS (Xms)"
-    pass
+
+    # 1. Chercher dans Redis
+    cached = r.get(cache_key)
+
+    if cached is not None:
+        # CACHE HIT
+        product = json.loads(cached)
+        elapsed = (time.time() - start) * 1000
+        print(f"  CACHE HIT  ({elapsed:.1f}ms) → {product['name']}")
+        return product
+
+    # CACHE MISS → requête DB lente
+    product = slow_db_get_product(product_id)
+    elapsed_before_store = (time.time() - start) * 1000
+
+    if product is not None:
+        # Stocker dans Redis avec TTL
+        r.setex(cache_key, ttl, json.dumps(product))
+
+    elapsed = (time.time() - start) * 1000
+    print(f"  CACHE MISS ({elapsed:.1f}ms) → {product['name'] if product else 'Not found'}")
+    return product
 
 
 def invalidate_product_cache(r, product_id: int):
     """Supprimer le cache d'un produit (après mise à jour en DB)"""
-    # TODO
-    pass
+    cache_key = f"product_cache:{product_id}"
+    deleted = r.delete(cache_key)
+    if deleted:
+        print(f"  Cache invalidé pour product_id={product_id}")
+    else:
+        print(f"  Aucun cache à invalider pour product_id={product_id}")
 
 
 def benchmark_cache(r, product_id: int, iterations: int = 20):
@@ -54,19 +75,52 @@ def benchmark_cache(r, product_id: int, iterations: int = 20):
     - Temps moyen cache MISS
     - Taux de cache hit (%)
     """
-    # TODO
-    pass
+    hit_times = []
+    miss_times = []
+
+    # S'assurer que le cache est vide avant le benchmark
+    r.delete(f"product_cache:{product_id}")
+
+    for i in range(iterations):
+        cache_key = f"product_cache:{product_id}"
+        start = time.time()
+        is_hit = r.exists(cache_key)  # Vérifier avant l'appel pour classifier
+        get_product_cached(r, product_id)
+        elapsed = (time.time() - start) * 1000
+
+        if is_hit:
+            hit_times.append(elapsed)
+        else:
+            miss_times.append(elapsed)
+
+    total = len(hit_times) + len(miss_times)
+    hit_rate = (len(hit_times) / total * 100) if total > 0 else 0
+
+    print(f"\n--- Résultats Benchmark ({iterations} itérations) ---")
+    print(f"  Cache MISS : {len(miss_times)} appel(s), "
+          f"temps moyen = {(sum(miss_times)/len(miss_times)):.1f}ms" if miss_times else "  Cache MISS : 0 appel")
+    print(f"  Cache HIT  : {len(hit_times)} appel(s), "
+          f"temps moyen = {(sum(hit_times)/len(hit_times)):.1f}ms" if hit_times else "  Cache HIT  : 0 appel")
+    print(f"  Taux de cache hit : {hit_rate:.1f}%")
+    speedup = (sum(miss_times)/len(miss_times)) / (sum(hit_times)/len(hit_times)) if hit_times and miss_times else None
+    if speedup:
+        print(f"  Accélération moyenne (HIT vs MISS) : x{speedup:.0f}")
 
 
 if __name__ == "__main__":
     r.flushdb()
-    
+
     print("=== Test Cache-Aside ===")
     print("\nPremier appel (MISS attendu):")
     get_product_cached(r, 1)
-    
+
     print("\nDeuxième appel (HIT attendu):")
     get_product_cached(r, 1)
-    
+
+    print("\n=== Test Invalidation ===")
+    invalidate_product_cache(r, 1)
+    print("Après invalidation (MISS attendu):")
+    get_product_cached(r, 1)
+
     print("\n=== Benchmark ===")
     benchmark_cache(r, 1, iterations=10)
